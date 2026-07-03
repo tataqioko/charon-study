@@ -7,6 +7,7 @@ import StudyView from "@/views/StudyView.vue";
 import SettingsView from "@/views/SettingsView.vue";
 import PlaygroundView from "@/views/PlaygroundView.vue";
 import QuizView from "@/views/QuizView.vue";
+import AllQuizzesView from "@/views/AllQuizzesView.vue";
 import ReviewView from "@/views/ReviewView.vue";
 import ReviewStatsView from "@/views/ReviewStatsView.vue";
 import WrongAnswersView from "@/views/WrongAnswersView.vue";
@@ -24,6 +25,7 @@ const router = createRouter({
         { path: "", redirect: "/app/courses" },
         { path: "courses", name: "courses", component: CoursesView },
         { path: "study/:id", name: "study", component: StudyView },
+        { path: "quizzes", name: "quizzes", component: AllQuizzesView },
         { path: "quiz/:courseId/:stepId", name: "quiz", component: QuizView },
         { path: "reviews", name: "reviews", component: AllReviewsView },
         { path: "review/:id", name: "review", component: ReviewView },

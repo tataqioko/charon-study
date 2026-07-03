@@ -16,6 +16,11 @@ export default defineConfig(async () => ({
     },
   },
 
+  // 优化依赖预构建
+  optimizeDeps: {
+    exclude: ['pdfjs-dist'],
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   clearScreen: false,
   server: {

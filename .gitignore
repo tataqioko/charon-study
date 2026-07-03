@@ -37,6 +37,10 @@ src-tauri/WixTools/
 .env.local
 .env.*.local
 
+# Development scripts
+*.bat
+!build.bat
+
 # OS
 Thumbs.db
 

@@ -5,6 +5,8 @@ import {
   saveApiKey,
   deleteApiKey,
   getApiBaseUrl,
+  setCustomBaseUrl,
+  clearCustomBaseUrl,
 } from "@/lib/api";
 
 const LS_MODEL = "charon:selected-model";
@@ -33,6 +35,16 @@ export const useSettingsStore = defineStore("settings", () => {
     keySaved.value = false;
   }
 
+  async function setBaseUrl(url: string) {
+    await setCustomBaseUrl(url);
+    baseUrl.value = url;
+  }
+
+  async function resetBaseUrl() {
+    await clearCustomBaseUrl();
+    baseUrl.value = await getApiBaseUrl();
+  }
+
   function setModel(id: string) {
     selectedModel.value = id;
     localStorage.setItem(LS_MODEL, id);
@@ -53,6 +65,8 @@ export const useSettingsStore = defineStore("settings", () => {
     init,
     setKey,
     clearKey,
+    setBaseUrl,
+    resetBaseUrl,
     setModel,
     toggleFavorite,
   };

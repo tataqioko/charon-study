@@ -1,0 +1,37 @@
+#!/bin/bash
+
+# 提交前检查脚本
+
+echo "🔍 检查 README 是否需要更新..."
+
+# 检查是否有功能性文件变更
+changed_files=$(git diff --cached --name-only)
+
+# 检查是否有新功能、路由、页面等变更
+needs_readme_update=false
+
+if echo "$changed_files" | grep -qE "src/views/|src/router/|src/layouts/|package.json"; then
+  needs_readme_update=true
+fi
+
+if [ "$needs_readme_update" = true ]; then
+  echo ""
+  echo "⚠️  检测到功能性变更，可能需要更新 README.md："
+  echo ""
+  echo "$changed_files" | grep -E "src/views/|src/router/|src/layouts/|package.json"
+  echo ""
+  echo "📝 请检查以下内容是否需要更新："
+  echo "  - ✨ 核心特性"
+  echo "  - 📖 使用说明"
+  echo "  - 🚀 快速开始"
+  echo ""
+  read -p "是否已经更新 README？(y/n) " -n 1 -r
+  echo ""
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "❌ 请先更新 README.md 后再提交"
+    exit 1
+  fi
+fi
+
+echo "✅ 检查通过"
+exit 0

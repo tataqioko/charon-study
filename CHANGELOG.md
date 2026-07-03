@@ -5,6 +5,25 @@ All notable changes to Charon-Study will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- 📂 完整文件上传支持（PDF、Word、PPT、图片 OCR）
+- 🧪 测验系统独立入口（错题本归入测验系统）
+- 🔧 提交前 README 检查流程（Git Hooks）
+- 📋 未来功能计划（学习激励、应试深化、知识库）
+
+### Changed
+- 📊 调整导航结构：测验系统独立，错题本归属测验
+- 📄 协议更改为 AGPL-3.0 with Commons Clause（禁止商用）
+- 🎨 所有图标添加 20% 圆角
+- 🔄 升级 CI/CD 到 Node 24
+
+### Fixed
+- 🐛 修复 GitHub Actions 发布权限问题
+- 🐛 修复标题栏图标占位符
+- 🐛 添加缺失的 typecheck 脚本
+
 ## [0.1.0] - 2026-07-04
 
 ### Added

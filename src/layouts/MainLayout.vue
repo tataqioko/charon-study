@@ -4,8 +4,8 @@ import Icon from "@/components/Icon.vue";
 
 const nav = [
   { to: "/app/courses", label: "我的课程", icon: "solar:book-2-bold-duotone" },
+  { to: "/app/quizzes", label: "测验系统", icon: "solar:clipboard-check-bold-duotone" },
   { to: "/app/reviews", label: "复习系统", icon: "solar:refresh-circle-bold-duotone" },
-  { to: "/app/wrong-answers", label: "错题本", icon: "solar:document-text-bold-duotone" },
   { to: "/app/playground", label: "对话调试台", icon: "solar:chat-round-dots-bold-duotone" },
   { to: "/app/settings", label: "设置", icon: "solar:settings-bold-duotone" },
 ];

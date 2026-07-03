@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/tabs";
 import { useSettingsStore } from "@/stores/settings";
 import { generateCourse, type GenProgress } from "@/lib/courseGen";
+import { parseFile, validateFileSize, SUPPORTED_EXTENSIONS } from "@/lib/fileParser";
 
 const emit = defineEmits<{ created: [] }>();
 const settings = useSettingsStore();
@@ -39,21 +40,29 @@ const modes = [
 async function handleFileSelect(e: Event) {
   const files = Array.from((e.target as HTMLInputElement).files ?? []);
   for (const f of files) {
-    if (f.size > 5 * 1024 * 1024) {
-      toast.error(`${f.name} 超过 5MB,跳过`);
-      continue;
-    }
-    const ext = f.name.split(".").pop()?.toLowerCase();
-    if (!["txt", "md", "markdown"].includes(ext ?? "")) {
-      toast.error(`${f.name} 格式不支持,当前仅支持 txt/md`);
-      continue;
-    }
     try {
-      const content = await f.text();
-      uploadedFiles.value.push({ name: f.name, content });
-      toast.success(`已读取 ${f.name}`);
-    } catch {
-      toast.error(`读取 ${f.name} 失败`);
+      // 检查文件大小（10MB 限制）
+      validateFileSize(f, 10);
+
+      const ext = f.name.split(".").pop()?.toLowerCase();
+      if (!SUPPORTED_EXTENSIONS.includes(ext ?? "")) {
+        toast.error(`${f.name} 格式不支持`);
+        continue;
+      }
+
+      // 图片解析需要模型
+      const isImage = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'].includes(ext ?? "");
+      if (isImage && !settings.selectedModel) {
+        toast.error("请先在设置中选择模型");
+        continue;
+      }
+
+      toast.info(`正在解析 ${f.name}...`);
+      const result = await parseFile(f, settings.selectedModel);
+      uploadedFiles.value.push({ name: result.filename, content: result.text });
+      toast.success(`已解析 ${f.name}`);
+    } catch (error) {
+      toast.error(String(error));
     }
   }
 }
@@ -141,11 +150,20 @@ async function submit() {
             <Input v-model="topic" placeholder="例如:工业药剂学 / 考研高数 / Rust 入门" @keyup.enter="submit" />
           </TabsContent>
           <TabsContent value="upload" class="space-y-2 mt-3">
-            <Label>上传文本材料（txt / md，单文件 ≤5MB）</Label>
+            <Label>上传学习材料（≤10MB）</Label>
+            <div class="text-xs text-muted-foreground mb-2">
+              支持：TXT、Markdown、PDF、Word (.docx)、PPT (.pptx)、图片 OCR
+            </div>
             <label class="relative block border-2 border-dashed rounded-lg py-8 text-center cursor-pointer transition-colors hover:border-primary/50 hover:bg-accent/30">
-              <input type="file" multiple accept=".txt,.md,.markdown" class="absolute inset-0 opacity-0 cursor-pointer" @change="handleFileSelect" />
+              <input
+                type="file"
+                multiple
+                accept=".txt,.md,.markdown,.pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.gif,.bmp"
+                class="absolute inset-0 opacity-0 cursor-pointer"
+                @change="handleFileSelect"
+              />
               <Icon name="solar:upload-minimalistic-bold-duotone" class="size-8 mx-auto text-muted-foreground" />
-              <p class="text-sm text-muted-foreground mt-2">点击选择文件</p>
+              <p class="text-sm text-muted-foreground mt-2">点击选择文件或拖拽到此处</p>
             </label>
             <div v-if="uploadedFiles.length" class="space-y-1.5 mt-3">
               <div v-for="(f, i) in uploadedFiles" :key="i" class="flex items-center gap-2 text-sm py-1.5 px-2 rounded bg-muted/50">

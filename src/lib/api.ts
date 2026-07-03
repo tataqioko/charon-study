@@ -72,3 +72,13 @@ export function chatOnce(
 ): Promise<string> {
   return invoke<string>("chat_once", { model, messages, temperature });
 }
+
+/** 设置自定义站点（仅开发模式） */
+export function setCustomBaseUrl(url: string): Promise<void> {
+  return invoke<void>("set_custom_base_url", { url });
+}
+
+/** 清除自定义站点（仅开发模式） */
+export function clearCustomBaseUrl(): Promise<void> {
+  return invoke<void>("clear_custom_base_url");
+}

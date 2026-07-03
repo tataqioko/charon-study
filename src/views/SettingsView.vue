@@ -19,9 +19,12 @@ const savingKey = ref(false);
 const models = ref<string[]>([]);
 const loadingModels = ref(false);
 const search = ref("");
+const customMode = ref(false); // 自定义模式
+const customBaseUrl = ref(""); // 自定义站点
 
 onMounted(async () => {
   await settings.init();
+  customBaseUrl.value = settings.baseUrl;
   if (settings.keySaved) refreshModels();
 });
 
@@ -39,6 +42,10 @@ async function saveKey() {
   if (!newKey.value.trim()) return;
   savingKey.value = true;
   try {
+    // 如果是自定义模式，先保存自定义站点
+    if (customMode.value && customBaseUrl.value.trim()) {
+      await settings.setBaseUrl(customBaseUrl.value.trim());
+    }
     await listModelsWithKey(newKey.value.trim());
     await settings.setKey(newKey.value.trim());
     newKey.value = "";
@@ -48,6 +55,15 @@ async function saveKey() {
     toast.error(`校验失败:${String(e)}`);
   } finally {
     savingKey.value = false;
+  }
+}
+
+async function toggleCustomMode() {
+  customMode.value = !customMode.value;
+  if (!customMode.value) {
+    // 退出自定义模式，恢复默认站点
+    await settings.resetBaseUrl();
+    customBaseUrl.value = settings.baseUrl;
   }
 }
 
@@ -82,12 +98,20 @@ async function clearKey() {
     <Card class="mt-6">
       <CardHeader>
         <CardTitle class="flex items-center gap-2"><Icon name="solar:link-circle-bold-duotone" class="size-5 text-primary" /> API 连接</CardTitle>
-        <CardDescription>站点已锁定,你只需提供 Key</CardDescription>
+        <CardDescription>
+          {{ customMode ? "自定义模式：使用你自己的 API 站点" : "站点已锁定,你只需提供 Key" }}
+        </CardDescription>
       </CardHeader>
       <CardContent class="space-y-4">
         <div class="flex items-center gap-2 text-sm">
           <span class="text-muted-foreground w-16">站点</span>
-          <code class="px-2 py-1 rounded bg-muted text-xs">{{ settings.baseUrl }}</code>
+          <Input
+            v-if="customMode"
+            v-model="customBaseUrl"
+            placeholder="https://your-api.com/v1"
+            class="h-7 text-xs flex-1"
+          />
+          <code v-else class="px-2 py-1 rounded bg-muted text-xs">{{ settings.baseUrl }}</code>
         </div>
         <div class="flex items-center gap-2 text-sm">
           <span class="text-muted-foreground w-16">状态</span>
@@ -108,9 +132,17 @@ async function clearKey() {
           </div>
         </div>
         <div class="flex items-center justify-between">
-          <button class="text-xs text-primary hover:underline flex items-center gap-1" @click="openExternal(settings.baseUrl)">
-            <Icon name="solar:link-bold" class="size-3.5" /> 获取 Key
-          </button>
+          <div class="flex items-center gap-2">
+            <button class="text-xs text-primary hover:underline flex items-center gap-1" @click="openExternal(settings.baseUrl)">
+              <Icon name="solar:link-bold" class="size-3.5" /> 获取 Key
+            </button>
+            <button
+              class="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              @click="toggleCustomMode"
+            >
+              自有模型？
+            </button>
+          </div>
           <Button v-if="settings.keySaved" variant="ghost" size="sm" class="text-destructive gap-1.5" @click="clearKey">
             <Icon name="solar:trash-bin-trash-bold-duotone" class="size-4" /> 清除 Key 并重测首启
           </Button>

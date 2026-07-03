@@ -43,6 +43,8 @@ const loading = computed(() =>
 );
 const showActionBar = ref(true); // 右侧操作栏折叠状态
 const showSidebar = ref(true); // 左侧课程目录折叠状态
+const actionBarWidth = ref(320); // 右侧栏宽度（可拖动调整）
+const isResizing = ref(false);
 
 // 问答历史
 const qaList = ref<QA[]>([]);
@@ -364,6 +366,26 @@ async function submitReschedule() {
     rescheduleProgress.value = null;
   }
 }
+
+// 拖动调整右侧栏宽度
+function startResize(e: MouseEvent) {
+  isResizing.value = true;
+  document.addEventListener('mousemove', handleResize);
+  document.addEventListener('mouseup', stopResize);
+  e.preventDefault();
+}
+
+function handleResize(e: MouseEvent) {
+  if (!isResizing.value) return;
+  const newWidth = window.innerWidth - e.clientX;
+  actionBarWidth.value = Math.max(240, Math.min(800, newWidth)); // 240px - 800px
+}
+
+function stopResize() {
+  isResizing.value = false;
+  document.removeEventListener('mousemove', handleResize);
+  document.removeEventListener('mouseup', stopResize);
+}
 </script>
 
 <template>
@@ -482,75 +504,104 @@ async function submitReschedule() {
     </main>
 
     <!-- 右侧操作栏 -->
-    <aside v-if="showActionBar && lectureMd && !loading" class="w-80 shrink-0 border-l bg-muted/10 flex flex-col">
+    <aside v-if="showActionBar && lectureMd && !loading" class="shrink-0 border-l bg-muted/10 flex flex-col relative" :style="{ width: actionBarWidth + 'px' }">
+      <!-- 拖动调整手柄 -->
+      <div
+        class="absolute left-0 top-0 bottom-0 w-1 cursor-ew-resize hover:bg-primary/50 transition-colors z-10"
+        @mousedown="startResize"
+      />
+
       <div class="h-11 px-4 flex items-center justify-between border-b">
         <span class="text-sm font-medium flex items-center gap-1.5">
-          <Icon name="solar:widget-5-bold-duotone" class="size-4 text-primary" /> 学习工具
+          <Icon name="solar:question-circle-bold-duotone" class="size-4 text-primary" /> 追问讲义
         </span>
         <button class="text-muted-foreground hover:text-foreground" title="折叠" @click="showActionBar = false">
-          <Icon name="solar:sidebar-minimalistic-linear" class="size-4" />
+          <Icon name="solar:close-circle-linear" class="size-4" />
         </button>
       </div>
 
-      <!-- 上方:追问输入 -->
-      <div class="p-4 border-b">
-        <div class="flex items-center gap-2 text-sm text-muted-foreground mb-3">
-          <Icon name="solar:chat-round-line-bold-duotone" class="size-4 text-primary" /> 没懂?随时追问
-        </div>
-        <div class="flex flex-wrap gap-2 mb-3">
-          <Button
-            v-for="qa in quickAsks" :key="qa.label"
-            variant="outline" size="sm" :disabled="asking"
-            @click="ask(qa.q)"
-          >{{ qa.label }}</Button>
-        </div>
-        <div class="flex gap-2">
-          <Input v-model="customQ" placeholder="或者输入你的问题…" :disabled="asking" @keyup.enter="ask(customQ)" />
-          <Button :disabled="asking || !customQ.trim()" class="gap-1.5 shrink-0" size="sm" @click="ask(customQ)">
-            <Icon :name="asking ? 'solar:refresh-bold' : 'solar:plain-2-bold-duotone'" :class="['size-4', asking && 'animate-spin']" />
-          </Button>
-        </div>
-      </div>
-
       <!-- 中间:问答历史(可滚动) -->
-      <div class="flex-1 overflow-auto p-4">
+      <div class="flex-1 overflow-auto px-3 py-4 space-y-3" :style="{ fontSize: fontScale + '%' }">
         <div v-if="!qaList.length && !currentAnswer" class="text-xs text-center text-muted-foreground py-8">
           还没有问答记录
         </div>
-        <div v-else class="space-y-3">
-          <div v-for="qa in qaList" :key="qa.id" class="rounded-lg border bg-card/50 p-3 text-sm space-y-2">
-            <div class="flex items-start gap-2">
-              <Icon name="solar:user-speak-rounded-bold-duotone" class="size-4 text-primary shrink-0 mt-0.5" />
-              <p class="flex-1 font-medium text-foreground">{{ qa.question }}</p>
-            </div>
-            <div class="flex items-start gap-2">
-              <Icon name="solar:chat-round-check-bold-duotone" class="size-4 text-green-600 shrink-0 mt-0.5" />
-              <div class="flex-1 text-muted-foreground prose prose-sm max-w-none" v-html="renderMarkdown(qa.answer)" />
+
+        <!-- 历史问答 -->
+        <div v-for="qa in qaList" :key="qa.id" class="space-y-2">
+          <!-- 用户问题气泡 -->
+          <div class="flex justify-end">
+            <div class="rounded-2xl rounded-tr-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground">
+              {{ qa.question }}
             </div>
           </div>
-          <!-- 当前正在生成的回答 -->
-          <div v-if="currentAnswer" class="rounded-lg border bg-card/50 p-3 text-sm space-y-2 border-primary/50">
-            <div class="flex items-start gap-2">
-              <Icon name="solar:user-speak-rounded-bold-duotone" class="size-4 text-primary shrink-0 mt-0.5" />
-              <p class="flex-1 font-medium text-foreground">正在回答...</p>
+          <!-- AI 回答气泡 -->
+          <div class="flex justify-start">
+            <div class="rounded-2xl rounded-tl-sm bg-muted px-4 py-2.5 text-sm">
+              <div class="prose prose-sm prose-slate dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0" v-html="renderMarkdown(qa.answer)" />
             </div>
-            <div class="flex items-start gap-2">
-              <Icon name="solar:chat-round-line-bold-duotone" class="size-4 text-primary shrink-0 mt-0.5 animate-pulse" />
-              <div class="flex-1 text-muted-foreground prose prose-sm max-w-none" v-html="renderMarkdown(currentAnswer)" />
+          </div>
+        </div>
+
+        <!-- 当前正在生成的回答 -->
+        <div v-if="currentAnswer" class="space-y-2">
+          <div class="flex justify-end">
+            <div class="rounded-2xl rounded-tr-sm bg-primary px-4 py-2.5 text-sm text-primary-foreground">
+              {{ customQ || '正在提问...' }}
+            </div>
+          </div>
+          <div class="flex justify-start">
+            <div class="rounded-2xl rounded-tl-sm bg-muted px-4 py-2.5 text-sm border-2 border-primary/30">
+              <div class="prose prose-sm prose-slate dark:prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0" v-html="renderMarkdown(currentAnswer)" />
             </div>
           </div>
         </div>
       </div>
 
-      <!-- 底部:固定按钮 -->
-      <div class="p-4 border-t space-y-2 bg-background">
-        <Button :variant="activeStep?.status === 'completed' ? 'outline' : 'default'" class="w-full gap-1.5" @click="markComplete">
-          <Icon :name="activeStep?.status === 'completed' ? 'solar:check-read-bold' : 'solar:check-circle-bold-duotone'" class="size-4" />
-          {{ activeStep?.status === 'completed' ? '已完成(点击取消)' : '标记本节完成' }}
-        </Button>
-        <Button variant="outline" class="w-full gap-1.5" @click="router.push(`/app/quiz/${courseId}/${activeStepId}`)">
-          <Icon name="solar:clipboard-check-bold-duotone" class="size-4" /> 开始本节测验
-        </Button>
+      <!-- 底部:固定按钮区 -->
+      <div class="border-t bg-background">
+        <!-- 操作按钮 -->
+        <div class="p-3 space-y-2">
+          <Button :variant="activeStep?.status === 'completed' ? 'outline' : 'default'" class="w-full gap-1.5 h-9" @click="markComplete">
+            <Icon :name="activeStep?.status === 'completed' ? 'solar:check-read-bold' : 'solar:check-circle-bold-duotone'" class="size-4" />
+            {{ activeStep?.status === 'completed' ? '已完成' : '标记完成' }}
+          </Button>
+          <Button variant="outline" class="w-full gap-1.5 h-9" @click="router.push(`/app/quiz/${courseId}/${activeStepId}`)">
+            <Icon name="solar:clipboard-check-bold-duotone" class="size-4" /> 开始测验
+          </Button>
+        </div>
+
+        <!-- 快捷追问 -->
+        <div class="px-3 pb-2 flex flex-wrap gap-1.5">
+          <button
+            v-for="qa in quickAsks" :key="qa.label"
+            class="text-xs px-2.5 py-1 rounded-full border bg-background hover:bg-accent transition-colors disabled:opacity-50"
+            :disabled="asking"
+            @click="ask(qa.q)"
+          >{{ qa.label }}</button>
+        </div>
+
+        <!-- 输入框 -->
+        <div class="p-3 pt-0">
+          <div class="flex gap-2">
+            <Input
+              v-model="customQ"
+              placeholder="输入你的问题…"
+              :disabled="asking"
+              class="h-9 text-sm"
+              @keyup.enter="ask(customQ)"
+            />
+            <Button
+              :disabled="asking || !customQ.trim()"
+              class="gap-1.5 shrink-0 h-9 px-3"
+              @click="ask(customQ)"
+            >
+              <Icon
+                :name="asking ? 'solar:refresh-bold' : 'solar:plain-2-bold-duotone'"
+                :class="['size-4', asking && 'animate-spin']"
+              />
+            </Button>
+          </div>
+        </div>
       </div>
     </aside>
 

@@ -1,14 +1,17 @@
 // Charon-Study API 后端
 // base_url 锁死为指定站点,用户仅提供 key。
+// 开发环境（debug_assertions）支持运行时自定义站点。
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use tauri::ipc::Channel;
 
-/// 锁死的 API 站点(用户改不了)。集中一处配置。
-const API_BASE_URL: &str = "https://api.nktp.top/v1";
+/// 默认 API 站点
+const DEFAULT_API_BASE_URL: &str = "https://api.nktp.top/v1";
+
 /// keyring 服务名与账户名,用于本地安全存储 API key。
 const KEYRING_SERVICE: &str = "charon-study";
 const KEYRING_ACCOUNT: &str = "api-key";
+const KEYRING_CUSTOM_URL: &str = "custom-base-url"; // 自定义站点存储（仅 debug）
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
@@ -78,10 +81,51 @@ fn read_key() -> Result<String> {
     }
 }
 
-/// 暴露锁死的站点地址给前端展示
+/// 读取 API 站点（生产环境锁死，开发环境支持自定义）
+fn get_base_url() -> String {
+    #[cfg(debug_assertions)]
+    {
+        // 开发模式：尝试读取自定义站点
+        if let Ok(entry) = keyring::Entry::new(KEYRING_SERVICE, KEYRING_CUSTOM_URL) {
+            if let Ok(url) = entry.get_password() {
+                if !url.is_empty() {
+                    return url;
+                }
+            }
+        }
+    }
+    // 生产环境或开发环境未设置自定义站点时，使用默认站点
+    DEFAULT_API_BASE_URL.to_string()
+}
+
+/// 暴露站点地址给前端展示
 #[tauri::command]
 fn get_api_base_url() -> String {
-    API_BASE_URL.to_string()
+    get_base_url()
+}
+
+/// 保存自定义站点（仅开发模式）
+#[cfg(debug_assertions)]
+#[tauri::command]
+fn set_custom_base_url(url: String) -> Result<()> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_CUSTOM_URL)
+        .map_err(|e| AppError::Keyring(e.to_string()))?;
+    entry
+        .set_password(&url)
+        .map_err(|e| AppError::Keyring(e.to_string()))
+}
+
+/// 清除自定义站点（仅开发模式）
+#[cfg(debug_assertions)]
+#[tauri::command]
+fn clear_custom_base_url() -> Result<()> {
+    let entry = keyring::Entry::new(KEYRING_SERVICE, KEYRING_CUSTOM_URL)
+        .map_err(|e| AppError::Keyring(e.to_string()))?;
+    match entry.delete_credential() {
+        Ok(_) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(e) => Err(AppError::Keyring(e.to_string())),
+    }
 }
 
 #[derive(Serialize)]
@@ -105,11 +149,12 @@ async fn list_models_with_key(key: String) -> Result<Vec<ModelInfo>> {
     fetch_models(key.trim()).await
 }
 
-/// 共享:向锁定站点拉取模型列表
+/// 共享:向站点拉取模型列表
 async fn fetch_models(key: &str) -> Result<Vec<ModelInfo>> {
+    let base_url = get_base_url();
     let client = reqwest::Client::new();
     let resp = client
-        .get(format!("{}/models", API_BASE_URL))
+        .get(format!("{}/models", base_url))
         .bearer_auth(key)
         .send()
         .await
@@ -167,6 +212,7 @@ async fn chat_stream(
     on_event: Channel<StreamEvent>,
 ) -> Result<()> {
     let key = read_key()?;
+    let base_url = get_base_url();
     let client = reqwest::Client::new();
 
     let body = serde_json::json!({
@@ -178,7 +224,7 @@ async fn chat_stream(
     });
 
     let resp = client
-        .post(format!("{}/chat/completions", API_BASE_URL))
+        .post(format!("{}/chat/completions", base_url))
         .bearer_auth(&key)
         .json(&body)
         .send()
@@ -248,6 +294,7 @@ async fn chat_once(
     temperature: Option<f64>,
 ) -> Result<String> {
     let key = read_key()?;
+    let base_url = get_base_url();
     let client = reqwest::Client::new();
 
     let body = serde_json::json!({
@@ -260,7 +307,7 @@ async fn chat_once(
     });
 
     let resp = client
-        .post(format!("{}/chat/completions", API_BASE_URL))
+        .post(format!("{}/chat/completions", base_url))
         .bearer_auth(&key)
         .json(&body)
         .send()
@@ -481,6 +528,10 @@ pub fn run() {
             list_models_with_key,
             chat_stream,
             chat_once,
+            #[cfg(debug_assertions)]
+            set_custom_base_url,
+            #[cfg(debug_assertions)]
+            clear_custom_base_url,
         ])
         .setup(|app| {
             // 系统托盘:显示/退出菜单 + 左键点击唤出窗口
