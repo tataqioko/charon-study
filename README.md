@@ -115,7 +115,9 @@ AI 会自动生成完整的学习计划。
 
 ## 📄 开源协议
 
-MIT License - 详见 [LICENSE](./LICENSE) 文件
+AGPL-3.0 with Commons Clause - 详见 [LICENSE](./LICENSE) 文件
+
+**注意**：本软件禁止任何形式的商业使用。你可以自由使用、学习和修改代码，但不得用于商业目的。
 
 ## 🙏 致谢
 
