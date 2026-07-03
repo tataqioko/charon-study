@@ -14,7 +14,7 @@ const { mode, toggle } = useTheme();
     class="h-9 shrink-0 flex items-center justify-between pl-4 pr-2 border-b bg-background/80 backdrop-blur select-none"
   >
     <div data-tauri-drag-region class="flex items-center gap-2 text-xs text-muted-foreground pointer-events-none">
-      <div class="size-4 rounded bg-primary text-primary-foreground grid place-items-center text-[10px] font-bold">C</div>
+      <img src="/favicon.png" alt="Charon" class="size-4 rounded" />
       Charon-Study
     </div>
     <div class="flex items-center gap-0.5">
