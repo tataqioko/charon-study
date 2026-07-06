@@ -1,18 +1,33 @@
 // 课程生成 prompt
 // 每个环节要求 LLM 输出严格 JSON，前端解析后落库。
 
+/** daily_plan 多 unit 层：一天内的单个学习单元（ daily_plan_payload.days[].units[]） */
+export interface DayUnit {
+  order_in_day: number; // 当天内顺序
+  title: string; // 单元标题
+  objective: string; // 单元学习目标
+  need_lecture: boolean; // 是否需要讲义
+  need_exercise: boolean; // 是否需要练习
+  related_knowledge_units: string[]; // 关联知识单元（unit_id 或标题）
+  source_refs: string[]; // 材料引用（material:xxx），无材料时为空数组
+  prerequisites: string[]; // 前置单元
+}
+
+export interface ScheduleDay {
+  day_index: number;
+  day_title: string;
+  learning_goal: string;
+  topic_scope: string[];
+  estimated_time: string;
+  completion_standard: string;
+  units?: DayUnit[]; // 多 unit 层；旧数据可能缺省（向后兼容）
+}
+
 export interface SchedulePayload {
   course_topic: string;
   total_days: number;
   daily_available_time: string;
-  days: {
-    day_index: number;
-    day_title: string;
-    learning_goal: string;
-    topic_scope: string[];
-    estimated_time: string;
-    completion_standard: string;
-  }[];
+  days: ScheduleDay[];
 }
 
 /** 排期环节:主题 + 天数/节奏 → N 天学习计划(JSON) */
@@ -62,15 +77,62 @@ JSON 结构严格如下:
       "learning_goal": "当天学习目标(一句话)",
       "topic_scope": ["知识点1", "知识点2"],
       "estimated_time": "预计耗时",
-      "completion_standard": "完成标准(学完能做到什么)"
+      "completion_standard": "完成标准(学完能做到什么)",
+      "units": [
+        {
+          "order_in_day": 1,
+          "title": "学习单元标题(比当天主题更细的一个知识点)",
+          "objective": "该单元学习目标(一句话)",
+          "need_lecture": true,
+          "need_exercise": true,
+          "related_knowledge_units": ["关联知识点或单元"],
+          "source_refs": [],
+          "prerequisites": ["前置单元标题(可为空)"]
+        }
+      ]
     }
   ]
 }
-days 数组长度必须等于 total_days。`,
+规则:
+- days 数组长度必须等于 total_days。
+- 每天拆成 1-3 个 units(学习单元),按 order_in_day 从 1 递增排序,由浅入深。
+- 每个 unit 是一个可独立成讲义的最小知识点;need_lecture 通常为 true。
+- need_exercise 表示该单元学完后是否需要配套练习(核心/易错单元设为 true)。
+- source_refs 一律留空数组([]);材料引用由系统在排期后按知识库自动匹配填充,你无需填写。
+- prerequisites 填写前置单元的标题;没有则用空数组 []。`,
     user: `请为主题《${topic}》制定一份 ${totalDays} 天的学习计划。
 每日可用时间:${dailyTime}。
 ${modeDesc}。
-从基础到进阶合理编排,每天聚焦 1-3 个知识点,循序渐进。${materialContext}${profileContext}`,
+从基础到进阶合理编排,每天聚焦 1-3 个知识点,并把每天拆成 1-3 个学习单元(units),循序渐进。${materialContext}${profileContext}`,
+  };
+}
+
+/** 讲义生成结果 */
+export interface LectureResult {
+  content_md: string;
+  suggested_questions: string[];
+}
+
+/** 从 AI 响应中提取讲义内容和建议问题 */
+export function parseLectureResponse(response: string): LectureResult {
+  // 提取建议复习问题部分
+  const questionsMatch = response.match(/##\s*建议复习问题\s*\n([\s\S]*?)(?=\n##|\n---\s*讲义结束|$)/i);
+  const suggested_questions: string[] = [];
+
+  if (questionsMatch) {
+    const questionsText = questionsMatch[1];
+    // 提取列表项：兼容有序列表（1. / 10. / 1、）与无序列表（- / *）
+    const questionItems = questionsText.match(/^\s*(?:\d+[.、]|[-*])\s+(.+)$/gm);
+    if (questionItems) {
+      suggested_questions.push(...questionItems.map(item =>
+        item.replace(/^\s*(?:\d+[.、]|[-*])\s+/, '').trim()
+      ));
+    }
+  }
+
+  return {
+    content_md: response,
+    suggested_questions,
   };
 }
 
@@ -80,26 +142,62 @@ export function lecturePrompt(
   dayTitle: string,
   learningGoal: string,
   topicScope: string[],
-  dailyTime: string
+  dailyTime: string,
+  contextSection?: string,
+  masteryContext?: string
 ): { system: string; user: string } {
+  const materialSection = contextSection || '';
+  const masterySection = masteryContext || '';
+
   return {
-    system: `你是一位极其擅长"从零带初学者入门"的学科名师。你要为学生生成一节讲义,输出 Markdown 格式(可含 KaTeX 数学公式用 $...$ 或 $$...$$,可含 Mermaid 图表用 \`\`\`mermaid 代码块)。
+    system: `你是一位极其擅长"从零带初学者入门"的学科名师。你要为学生生成一节讲义,输出 Markdown 格式。
 
-严格按以下结构输出:
-1. 以 "# 标题" 开头(标题=当天主题)
-2. "## 划重点环节":先安抚初学者("如果你一点没学过,完全没关系,我们从零一步步走"),再列出 3-5 条必背结论,关键词加粗
-3. 分讲正文(## 一、## 二...):每个概念讲清"是什么/为什么/怎么用",多用生活化提问和类比,适当用表格归纳
-4. "## 课堂总结":回顾式收尾,鼓励学生
-5. 末尾输出:--- 讲义结束 ---
+**核心教学法:三步法**
+对每个概念采用:
+1. **精确定义** - 严格的学术定义
+2. **提出具体实例** - 可操作的例子或真实案例
+3. **围绕实例剖析** - 深入讲解为什么这样设计
 
-语气口语化、第二人称"你"、鼓励式,把学生当第一次接触这门课。`,
+**必须包含的元素:**
+
+1. **划重点环节** (## 开头)
+   - 先安抚初学者:"如果你一点没学过,完全没关系,我们从零一步步走"
+   - 列出 3-5 条必背结论,用 **加粗** 强调关键词
+   - 每条结论要具体、可验证
+
+2. **分讲正文** (### 第一讲、### 第二讲...)
+   - 每讲开头用生活化问题引入
+   - 核心概念用三步法展开
+   - 适当用表格归纳对比
+   - **每讲必须配1-2个 SVG 图表**
+
+3. **SVG 图表要求** (关键!)
+   - 用 \`\`\`svg 代码块嵌入
+   - 图表类型:关系图、流程图、对比图、结构图
+   - 配色柔和专业(避免纯色,用 #2c3e50, #3498db, #e74c3c 等)
+   - 必须有标题、图例、说明文字
+   - 图表后紧跟 **图解说明** 段落
+
+4. **课堂总结** (## 开头)
+   - 回顾式收尾
+   - 鼓励学生
+
+5. **建议复习问题** (## 开头)
+   - 列出 3-5 个引导性问题
+   - 帮助学生自我检查
+
+**数学公式:** 用 KaTeX 格式 $...$ (行内) 或 $$...$$ (独立行)
+**图表:** 优先用 SVG,复杂流程可用 \`\`\`mermaid
+**语气:** 口语化、第二人称"你"、鼓励式
+
+末尾输出: --- 讲义结束 ---`,
     user: `课程:《${courseTopic}》
 本节主题:${dayTitle}
 学习目标:${learningGoal}
 覆盖知识点:${topicScope.join("、")}
-建议时长:${dailyTime}
+建议时长:${dailyTime}${materialSection}${masterySection}
 
-请生成这一节的完整讲义。`,
+请生成这一节的完整讲义,确保包含 SVG 图表和三步法讲解。`,
   };
 }
 
@@ -126,13 +224,24 @@ ${lectureExcerpt.slice(0, 2000)}
   };
 }
 
-/** 测验题型 */
+/** 测验题型（ 6 大题型 + 每题可配 SVG 图示） */
 export interface QuizQuestion {
-  kind: "single_choice" | "multi_choice" | "judgment" | "fill_blanks" | "free_response";
+  kind:
+    | "single_choice"
+    | "multi_choice"
+    | "judgment"
+    | "fill_blanks"
+    | "ordering" // 排序题：把 items 拖成正确顺序
+    | "error_spot" // 纠错题：从 choices 中选出有错误的一项
+    | "free_response"; // 主观题：LLM 评分
   stem: string;
-  choices?: { id: string; label: string }[]; // 选择题
-  answer: string | string[]; // 单选=选项id;多选=id数组;判断="true"/"false";填空/主观=参考文本
+  choices?: { id: string; label: string }[]; // 选择题 / 纠错题
+  items?: string[]; // 排序题：乱序展示的待排序项（answer 为正确顺序数组）
+  answer: string | string[]; // 单选/纠错=选项id;多选=id数组;判断="true"/"false";排序=正确顺序数组;填空/主观=参考文本
   explanation: string;
+  svg?: string; // 题目配图（SVG 源码，可选）
+  rubric?: string; // 主观题评分标准（供 LLM 评分参考）
+  reference_answer?: string; // 主观题参考答案
 }
 
 export interface QuizPayload {
@@ -144,30 +253,86 @@ export function quizPrompt(
   courseTopic: string,
   dayTitle: string,
   learningGoal: string,
-  topicScope: string[]
+  topicScope: string[],
+  retrievedContext?: string,
+  masteryContext?: string
 ): { system: string; user: string } {
+  const contextSection = retrievedContext
+    ? `\n\n以下是从用户上传的学习材料中检索到的相关内容：\n${retrievedContext}\n\n请基于上述材料内容出题，确保题目和答案都来自材料。`
+    : '';
+
+  const masterySection = masteryContext || '';
+
+  // 根据掌握度调整难度指引
+  const difficultyGuide = masteryContext
+    ? `\n\n**自适应难度调整**：根据学习者历史表现，对薄弱知识点出基础巩固题，对已掌握知识点出进阶应用题。`
+    : '';
+
   return {
     system: `你是命题专家。为学生刚学完的这一节出一套测验,只输出一个 JSON 对象,不要任何解释或代码块标记。
 结构严格如下:
 {
   "questions": [
     {
-      "kind": "single_choice",        // single_choice|multi_choice|judgment|fill_blanks|free_response
+      "kind": "single_choice",        // single_choice|multi_choice|judgment|fill_blanks|ordering|error_spot|free_response
       "stem": "题干",
-      "choices": [{"id":"a","label":"选项内容"}],   // 选择题必填;判断/填空/主观省略
-      "answer": "a",                   // 单选=选项id;多选=["a","c"];判断="true"或"false";填空/主观=参考答案文本
-      "explanation": "答案解析"
+      "choices": [{"id":"a","label":"选项内容"}],   // 选择题/纠错题必填;其它题型省略
+      "items": ["步骤A","步骤B","步骤C"],            // 仅排序题(ordering)必填:乱序展示的待排序项
+      "answer": "a",                   // 单选/纠错=选项id;多选=["a","c"];判断="true"/"false";排序=按正确顺序排列的 items 数组;填空/主观=参考答案文本
+      "explanation": "答案解析",
+      "svg": "<svg ...>...</svg>",     // 可选:该题配图(SVG 源码),有助理解时才加
+      "rubric": "评分标准",            // 仅主观题(free_response):分点说明如何给分
+      "reference_answer": "参考答案"    // 仅主观题(free_response):理想答案
     }
   ]
 }
-出 6 道题,按此顺序:1 单选、2 判断、3 多选、4 填空(fill_blanks,题干用 ___ 表示空)、5 单选、6 主观题(free_response)。
-题目紧扣本节知识点,难度适中,解析清晰。`,
+出 6 道题,按此顺序:
+1. 单选(single_choice)
+2. 判断(judgment)
+3. 多选(multi_choice)
+4. 排序(ordering,给出 3-5 个 items,answer 为正确顺序的完整数组)
+5. 纠错(error_spot,给出 3-4 个 choices,其中恰有一个存在错误/不成立,answer 为该错误项的 id)
+6. 主观题(free_response,必须给出 rubric 和 reference_answer)
+题目紧扣本节知识点,难度适中,解析清晰。涉及流程/结构/关系的题目可在 svg 字段配图。${difficultyGuide}`,
     user: `课程:《${courseTopic}》
 本节:${dayTitle}
 学习目标:${learningGoal}
-知识点:${topicScope.join("、")}
+知识点:${topicScope.join("、")}${contextSection}${masterySection}
 
 请出这一节的测验。`,
+  };
+}
+
+/** 主观题 LLM 评分结果 */
+export interface GradeResult {
+  score: number; // 0-100
+  feedback: string; // 评语/改进建议
+}
+
+/** 主观题评分:根据 rubric + 参考答案给学生作答打分 */
+export function gradeFreeResponsePrompt(
+  stem: string,
+  userAnswer: string,
+  rubric: string,
+  referenceAnswer: string
+): { system: string; user: string } {
+  return {
+    system: `你是严谨而鼓励式的阅卷老师。根据评分标准和参考答案，为学生的主观题作答打分。
+只输出一个 JSON 对象，不要任何解释或代码块标记，结构如下:
+{
+  "score": 85,          // 0-100 的整数分
+  "feedback": "评语：先肯定答对的点，再具体指出缺漏与改进方向"
+}
+评分要客观公正：答案正确完整给高分；部分正确给部分分；跑题或空白给低分。feedback 用第二人称"你"，简洁具体。`,
+    user: `题目：${stem}
+
+评分标准：${rubric || "（未提供，请按参考答案的要点酌情给分）"}
+
+参考答案：${referenceAnswer || "（未提供）"}
+
+学生作答：${userAnswer || "（未作答）"}
+
+请打分。`,
   };
 }
 
@@ -191,6 +356,8 @@ export interface DiagnosticQuestion {
   question: string;
   options?: string[]; // 选择题选项
   scale_range?: { min: number; max: number; min_label: string; max_label: string }; // 量表题
+  custom_enabled?: boolean; // 是否允许自定义补充（）
+  custom_placeholder?: string; // 自定义补充的占位符
 }
 
 export interface DiagnosticPayload {
@@ -210,13 +377,17 @@ export function diagnosticPrompt(topic: string): { system: string; user: string 
       "id": "q1",
       "type": "single_choice",
       "question": "问题文本",
-      "options": ["选项A", "选项B", "选项C", "选项D"]
+      "options": ["选项A", "选项B", "选项C", "选项D"],
+      "custom_enabled": true,
+      "custom_placeholder": "可选：写下你针对这个问题最想补的重点"
     },
     {
       "id": "q2",
       "type": "scale",
       "question": "问题文本",
-      "scale_range": {"min": 1, "max": 5, "min_label": "完全不了解", "max_label": "非常熟悉"}
+      "scale_range": {"min": 1, "max": 5, "min_label": "完全不了解", "max_label": "非常熟悉"},
+      "custom_enabled": true,
+      "custom_placeholder": "可选：写下你针对这个问题最想补的重点"
     }
   ],
   "fixed_questions": [
@@ -241,8 +412,89 @@ export function diagnosticPrompt(topic: string): { system: string; user: string 
   ]
 }
 
-AI 题要能测出学习者的基础水平(从入门到进阶),题目类型混合使用(选择/量表)。`,
+AI 题要能测出学习者的基础水平(从入门到进阶),题目类型混合使用(选择/量表)。
+AI 题都要设置 custom_enabled: true，允许学习者补充自己的具体重点。`,
     user: `请为主题《${topic}》生成诊断问卷。`,
+  };
+}
+
+/** 供诊断问卷参考的知识单元摘要（标题 + 概述）。 */
+export interface DiagnosticUnitBrief {
+  title: string;
+  summary: string;
+}
+
+/**
+ * 基于知识库的诊断问卷（：诊断题建立在知识单元之上，而非只对着主题名瞎猜）。
+ * 输入主题 + 从上传材料抽取的知识单元清单（标题+概述），AI 题需紧扣这些真实知识点，
+ * 以便测出学习者对「本材料实际覆盖内容」的掌握程度。固定偏好题与主题版保持一致。
+ */
+export function diagnosticFromUnitsPrompt(
+  topic: string,
+  units: DiagnosticUnitBrief[]
+): { system: string; user: string } {
+  const roster = units
+    .map((u, i) => `${i + 1}. ${u.title}${u.summary ? `：${u.summary}` : ""}`)
+    .join("\n");
+
+  return {
+    system: `你是一位资深教育专家,擅长通过诊断问卷了解学习者的基础水平、学习风格和需求。
+你要为主题《${topic}》生成一份诊断问卷,包含 5 个 AI 自适应题 + 3 个固定偏好题。
+
+**关键**：下面会给你一份「知识单元清单」，它是从学习者上传的真实材料里抽取出来的。
+你的 5 个 AI 题【必须】紧扣这些真实知识点来测学习者的基础，而不是泛泛地问主题常识。
+例如围绕清单里的具体术语、方法、概念设问，判断学习者对本材料覆盖内容的熟悉程度。
+
+输出严格 JSON,不要任何解释或代码块标记。结构如下:
+{
+  "ai_questions": [
+    {
+      "id": "q1",
+      "type": "single_choice",
+      "question": "问题文本",
+      "options": ["选项A", "选项B", "选项C", "选项D"],
+      "custom_enabled": true,
+      "custom_placeholder": "可选：写下你针对这个问题最想补的重点"
+    },
+    {
+      "id": "q2",
+      "type": "scale",
+      "question": "问题文本",
+      "scale_range": {"min": 1, "max": 5, "min_label": "完全不了解", "max_label": "非常熟悉"},
+      "custom_enabled": true,
+      "custom_placeholder": "可选：写下你针对这个问题最想补的重点"
+    }
+  ],
+  "fixed_questions": [
+    {
+      "id": "pref1",
+      "type": "single_choice",
+      "question": "你更喜欢的学习方式?",
+      "options": ["看视频讲解", "读文字教程", "动手实践", "听音频课"]
+    },
+    {
+      "id": "pref2",
+      "type": "single_choice",
+      "question": "你的学习目标是?",
+      "options": ["快速入门", "系统掌握", "应试考试", "兴趣爱好"]
+    },
+    {
+      "id": "pref3",
+      "type": "scale",
+      "question": "你每天愿意投入的学习时间?",
+      "scale_range": {"min": 1, "max": 5, "min_label": "30分钟", "max_label": "3小时以上"}
+    }
+  ]
+}
+
+AI 题要能测出学习者对上述知识单元的掌握程度(从入门到进阶),题目类型混合使用(选择/量表)。
+AI 题都要设置 custom_enabled: true，允许学习者补充自己的具体重点。`,
+    user: `课程主题：《${topic}》
+
+从学习者上传材料中抽取的知识单元清单（共 ${units.length} 个）：
+${roster}
+
+请据此生成诊断问卷，AI 题紧扣上述真实知识点。`,
   };
 }
 
